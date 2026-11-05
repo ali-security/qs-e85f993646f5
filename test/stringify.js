@@ -499,6 +499,134 @@ test('stringify()', function (t) {
         st.end();
     });
 
+    t.test('should encode the key of an empty array when allowEmptyArrays is set', function (st) {
+        st.equal(
+            qs.stringify({ 'a b': [] }, { allowEmptyArrays: true }),
+            'a%20b[]',
+            'default (RFC3986) percent-encodes the space in the key'
+        );
+        st.equal(
+            qs.stringify({ 'a b': [] }, { allowEmptyArrays: true, format: 'RFC1738' }),
+            'a+b[]',
+            'RFC1738 encodes the space in the key as a plus'
+        );
+        st.equal(
+            qs.stringify({ 'a b': [] }, { allowEmptyArrays: true, encodeValuesOnly: true }),
+            'a b[]',
+            'encodeValuesOnly leaves the key unencoded'
+        );
+        st.equal(
+            qs.stringify({ 'a b': [] }, { allowEmptyArrays: true, encode: false }),
+            'a b[]',
+            'encode: false leaves the key unencoded'
+        );
+
+        st.deepEqual(
+            qs.parse(qs.stringify({ 'a b': [], 'a&b=c': [] }, { allowEmptyArrays: true }), { allowEmptyArrays: true }),
+            { 'a b': [], 'a&b=c': [] },
+            'the encoded keys round-trip back to the original, including `&` and `=`'
+        );
+        st.equal(
+            qs.stringify({ 'a b': ['x'] }, { allowEmptyArrays: true, arrayFormat: 'brackets' }),
+            'a%20b%5B%5D=x',
+            'the same key with a value encodes the key prefix identically'
+        );
+        st.equal(
+            qs.stringify({ a: { 'b c': [] } }, { allowEmptyArrays: true }),
+            'a%5Bb%20c%5D[]',
+            'a nested key prefix is encoded like the value path encodes it'
+        );
+        st.equal(
+            qs.stringify({ a: { b: [] } }, { allowEmptyArrays: true }),
+            'a%5Bb%5D[]',
+            'a nested key that needs no encoding still has its brackets encoded'
+        );
+        st.equal(
+            qs.stringify({ 'a.b': [] }, { allowEmptyArrays: true, allowDots: true, encodeDotInKeys: true }),
+            'a%252Eb[]',
+            'encodeDotInKeys double-encodes the dot, as on the value path'
+        );
+        st.deepEqual(
+            qs.parse('a%252Eb[]', { allowEmptyArrays: true, allowDots: true, decodeDotInKeys: true }),
+            { 'a.b': [] },
+            'the encodeDotInKeys output round-trips'
+        );
+
+        st.end();
+    });
+
+    t.test('an empty array key cannot inject query string syntax when allowEmptyArrays is set', function (st) {
+        var injected = qs.stringify({ q: 'hi', 'x&apiKey=evil&y': [] }, { allowEmptyArrays: true });
+        st.equal(injected, 'q=hi&x%26apiKey%3Devil%26y[]', '`&` and `=` in the key are percent-encoded');
+        var parsed = qs.parse(injected, { allowEmptyArrays: true });
+        st.deepEqual(parsed, { q: 'hi', 'x&apiKey=evil&y': [] }, 'the key parses back as a single key');
+        st.notOk('apiKey' in parsed, 'no `apiKey` parameter is injected');
+
+        st.equal(
+            qs.stringify({ 'x#': [], z: '1' }, { allowEmptyArrays: true }),
+            'x%23[]&z=1',
+            '`#` in the key is percent-encoded and cannot truncate the query string'
+        );
+
+        st.equal(
+            qs.stringify({ a: { 'b&k=v': [] } }, { allowEmptyArrays: true }),
+            'a%5Bb%26k%3Dv%5D[]',
+            'a nested key is encoded'
+        );
+        st.equal(
+            qs.stringify({ a: { 'b&k=v': [] } }, { allowEmptyArrays: true, allowDots: true }),
+            'a.b%26k%3Dv[]',
+            'a nested key is encoded with allowDots'
+        );
+
+        var arrayFormats = ['indices', 'brackets', 'repeat', 'comma'];
+        for (var i = 0; i < arrayFormats.length; i++) {
+            st.equal(
+                qs.stringify({ 'x&k=v': [] }, { allowEmptyArrays: true, arrayFormat: arrayFormats[i] }),
+                'x%26k%3Dv[]',
+                'the key is encoded with arrayFormat ' + arrayFormats[i]
+            );
+        }
+        st.equal(
+            qs.stringify({ 'x&k=v': [] }, { allowEmptyArrays: true, arrayFormat: 'comma', commaRoundTrip: true }),
+            'x%26k%3Dv[]',
+            'the key is encoded with arrayFormat comma and commaRoundTrip'
+        );
+
+        st.equal(
+            qs.stringify({ 'x;k=v': [], z: '1' }, { allowEmptyArrays: true, delimiter: ';' }),
+            'x%3Bk%3Dv[];z=1',
+            'a custom delimiter in the key is percent-encoded'
+        );
+
+        st.equal(
+            qs.stringify(
+                { 'x&k=v': 'ignored' },
+                {
+                    allowEmptyArrays: true,
+                    filter: function (prefix, value) { return prefix === 'x&k=v' ? [] : value; }
+                }
+            ),
+            'x%26k%3Dv[]',
+            'a key whose value becomes an empty array via `filter` is encoded'
+        );
+
+        var keysSeen = [];
+        var customEncoded = qs.stringify({ 'x&k=v': [] }, {
+            allowEmptyArrays: true,
+            encoder: function (str, defaultEncoder, charset, type) {
+                if (type === 'key') {
+                    keysSeen.push(str);
+                }
+                return defaultEncoder(str, defaultEncoder, charset);
+            }
+        });
+        st.equal(customEncoded, 'x%26k%3Dv[]', 'a custom encoder encodes the key');
+        st.deepEqual(keysSeen, ['x&k=v'], 'a custom encoder is called for the key');
+
+        st.end();
+    });
+
     t.test('stringifies an array value with one item vs multiple items', function (st) {
         st.test('non-array item', function (s2t) {
             s2t.equal(qs.stringify({ a: 'c' }, { encodeValuesOnly: true, arrayFormat: 'indices' }), 'a=c');
